@@ -145,3 +145,7 @@ dmypy.json
 .micropy/
 !micropy.json
 !src/lib
+
+
+# eagle temps
+*#*

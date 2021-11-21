@@ -17,6 +17,7 @@ Permanent log is stored on the SD card and currently measurred values are output
   - 16 bit, 4 channel, channel V<sub>max</sub> = V<sub>dd</sub>, I2C (72 = 0x48)
   - has to be powered by 5V in our case (or voltage divider has to be adjusted)
   - we're measuring all cells against common ground and getting individual cell voltages via substraction
+  - by default the measured voltage is obtained by `RAW * 6.144 / 32768` (`6.144` is the gain; `32768` is the 2^16 range). The transformation is included into polynomial correction formulas in our case. Calibration measurements are available in the documentation.
 
 - SD card reader
   - SPI, picky on what SD card it accepts
@@ -34,6 +35,10 @@ Permanent log is stored on the SD card and currently measurred values are output
   - P1 potentiometer - fine adjustment (+-0.5 V) of the measured voltage based on a manual check with calibrated multimeter
 - LCD
     - I2C, 2x16 (or 20x4) chars, provides current values and instructions
+    - 2x16:
+        - default I2C address = 39 (0x27)
+        - contrast trimmer is quite sensitive
+        
 - UART/Serial data line
     - to allow terminal output and logging (PuTTY). Speed: 115200
     - connected into FT232/CH430/CP2102 USB
@@ -60,3 +65,5 @@ Permanent log is stored on the SD card and currently measurred values are output
 **Possible future features**
 - replace Fuse with PTC/Polyfuse
   - suitable RC circuit would have to be designed due to slow polyfuse react times
+- use ALRT/RDY pin on ADS1115 to verify it's ready 
+- automatic selection of the power line based on the max. voltage
