@@ -20,6 +20,7 @@ class Guesstimator:
         self.ads_buffer = CNFG.ADS_ARRAY
         self.data = {
             "adc_voltage": [0] * 4,  # empty list, 4 elements
+            "adc_raw": [0] * 4,  # empty list, 4 elements
             "pot": 0,
         }
 
@@ -27,6 +28,8 @@ class Guesstimator:
         for channel in range(0, 4):
             # read data from the sensor
             self.ads_buffer = self.hw["ads"].read(channel1=channel)
+            # log raw values
+            self.data["adc_raw"][channel] = self.ads_buffer
             # apply third polynomial conversion
             voltage = CNFG.ADS_CORRECTIONS[channel](self.ads_buffer)
             # add manual adjust
@@ -43,16 +46,17 @@ class Guesstimator:
         self.measure_pot()
 
     def debug(self):
-        out = [f"{v:0.2f}" for v in self.data["adc_voltage"]]
+        out = [f"{v:05.2f}" for v in self.data["adc_voltage"]]
+        # out = [str(v) for v in self.data["adc_raw"]]  # DEBUG to print RAW ADC values to serial
         out += [str(self.data["pot"])]
         print(CNFG.CSV_SPLIT.join(out))
 
     def voltage_demo(self):
-        self.hw["lcd"].show_cursor()
-        self.hw["lcd"].clear()
+        # self.hw["lcd"].show_cursor()
+        # self.hw["lcd"].clear()
         for row in range(0, 4):
             voltage = self.data["adc_voltage"][row]
-            msg = "{}: {:00.2f} V | {:^8}".format(
+            msg = "{}: {:05.2f} V | {:^8}".format(
                 row + 1, voltage, "<" + "-" * (row + 1)
             )
             self.hw["lcd"].move_to(0, row)
