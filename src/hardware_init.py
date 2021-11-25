@@ -1,13 +1,13 @@
-import config as CNFG
-from config import MESSAGES as MSG
-from machine import Pin, I2C, ADC, SPI
-from array import array
 import os
 from time import sleep
+from machine import Pin, I2C, ADC, SPI
 
 from circuitpython_i2c_lcd import I2cLcd
 from ads1x15 import ADS1115
 from sdcard import SDCard
+
+import config as CNFG
+from config import MESSAGES as MSG
 
 
 def setup_i2c():

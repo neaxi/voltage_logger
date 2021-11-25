@@ -18,6 +18,9 @@ Permanent log is stored on the SD card and currently measurred values are output
   - has to be powered by 5V in our case (or voltage divider has to be adjusted)
   - we're measuring all cells against common ground and getting individual cell voltages via substraction
   - by default the measured voltage is obtained by `RAW * 6.144 / 32768` (`6.144` is the gain; `32768` is the 2^16 range). The transformation is included into polynomial correction formulas in our case. Calibration measurements are available in the documentation.
+  - ADC GND is connected to "both" grounds - power source GND and step down GND
+    - this partially bypasses the power switch as even when turned off the power buss for digital part has active voltage, but low enough to avoid activating anything
+    - V<sub>src</sub> -> V<sub>pwrbus</sub>: 57 V -> 0.83 V; 30 V -> 0.48 V; 10 V -> 0.07 V
 
 - SD card reader
   - SPI, picky on what SD card it accepts
@@ -32,10 +35,10 @@ Permanent log is stored on the SD card and currently measurred values are output
   - BTN1 - Power off/on
   - BTN2 - Enable/Disable SD write 
   - BTN3 - LCD backlight
-  - P1 potentiometer - fine adjustment (+-0.5 V) of the measured voltage based on a manual check with calibrated multimeter
+  - P1 potentiometer - fine adjustment (+-1 V) of the measured voltage based on a manual check with calibrated multimeter
 - LCD
     - I2C, 2x16 (or 20x4) chars, provides current values and instructions
-    - 2x16:
+    - 20x4:
         - default I2C address = 39 (0x27)
         - contrast trimmer is quite sensitive
         
@@ -63,7 +66,8 @@ Permanent log is stored on the SD card and currently measurred values are output
 
 # 
 **Possible future features**
-- replace Fuse with PTC/Polyfuse
+- [] replace Fuse with PTC/Polyfuse
   - suitable RC circuit would have to be designed due to slow polyfuse react times
-- use ALRT/RDY pin on ADS1115 to verify it's ready 
-- automatic selection of the power line based on the max. voltage
+- [] use ALRT/RDY pin on ADS1115 to verify it's ready 
+- [x] automatic selection of the power line based on the max. voltage
+-- DONE, handled in analog
