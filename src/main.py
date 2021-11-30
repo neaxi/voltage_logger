@@ -15,13 +15,13 @@ class Guesstimator:
         self.hw = hw_init()
         if self.hw:
             self.hw["lcd"].clear()
-            # self.add_sw2_handlers()
+            self._add_sw2_handlers()
         else:
             print("Hardware setup error. Exiting\n\n\n")
             sys.exit()
 
         # current state - meas vs setup
-        self.state = "setup"
+        self.meas = False
         # correction
         self.v_corr = 0
 
@@ -37,6 +37,10 @@ class Guesstimator:
             "avg_feed": [[] for _ in range(CNFG.CHNLS)],  # list of lists
         }
         self.volt_avg = [0] * CNFG.CHNLS
+
+    def _add_sw2_handlers(self):
+        self.hw["sw2"].open_func(self.sw2_meas, (False,))
+        self.hw["sw2"].close_func(self.sw2_meas, (True,))
 
     """
     CORO 1 - measure ADC values and parse them 
@@ -90,7 +94,7 @@ class Guesstimator:
     async def coro_data_prep(self):
         """safely access avg data, create a copy and add it to SD queue"""
         while True:
-            if self.state == "meas":
+            if self.meas:
                 self.sd_buffer.append(self.volt_avg)
             await uasyncio.sleep(CNFG.T_CLI_PRINT_MEAS)
 
@@ -102,7 +106,7 @@ class Guesstimator:
         # self.hw["lcd"].show_cursor()
         while True:
             for row in range(0, CNFG.CHNLS):
-                voltage = self.volt_avg[row]
+                voltage = self.ads["volt_adj"][row]
                 msg = f"{row + 1}: {voltage:05.2f} V | "
                 self.hw["lcd"].move_to(0, row)
                 self.hw["lcd"].putstr(msg)
@@ -114,19 +118,46 @@ class Guesstimator:
 
     async def coro_update_cli_values(self):
         while True:
-            if self.state == "meas":
+            if self.meas:
                 out = ["######"]
+                self.meas_count += 1
+                data = self.volt_avg
             else:
                 out = []
+                # show real time values during setup
+                data = self.ads["volt_adj"]
             out += [f"{self.meas_count}"]
-            out += [f"{v:05.2f}" for v in self.volt_avg]
+            out += [f"{v:05.2f}" for v in self.ads["volt_adj"]]
             out += [str(self.v_corr)]
 
             print(CNFG.CSV_SPLIT.join(out))
-            if self.state == "setup":
-                await uasyncio.sleep(CNFG.T_CLI_PRINT_SETUP)
-            else:
+            if self.meas:
                 await uasyncio.sleep(CNFG.T_CLI_PRINT_MEAS)
+            else:
+                await uasyncio.sleep(CNFG.T_CLI_PRINT_SETUP)
+
+    """
+    CORO 5 - POT and SW2 
+    """
+
+    async def sw2_meas(self, state):
+        if state:
+            st = "closed"
+            self.meas = True
+            print("MEASUREMENT: displaying AVG values")
+        else:
+            st = "opened"
+            self.meas = False
+            self.meas_count = 0
+            print("SETUP: displaying real time values")
+        print(f"Switch SW2 is {st}; Meas state {self.meas}")
+
+    async def coro_measure_pot(self):
+        """read pot, map the 4096 values on range 0-V_CORR and substract half to have 0 in middle of the interval"""
+        while True:
+            val = self.hw["pot"].read()
+            self.v_corr = round(val / 4096 * CNFG.V_CORR - CNFG.V_CORR / 2, 2)
+            await uasyncio.sleep(CNFG.T_ADS_MEAS)
 
     def start(self):
         """
@@ -135,6 +166,7 @@ class Guesstimator:
         2 - prepare data in queue for LCD, CLI and SD
         3 - update LCD values
         4 - CLI value printing
+        5 - monitor POT and SW2
         """
         print("Starting parallel execution.")
         loop = uasyncio.get_event_loop(runq_len=40, waitq_len=40)
@@ -142,16 +174,8 @@ class Guesstimator:
         loop.create_task(self.coro_data_prep())
         loop.create_task(self.coro_update_lcd_voltages())
         loop.create_task(self.coro_update_cli_values())
-        loop.create_task(debug())
+        loop.create_task(self.coro_measure_pot())
         loop.run_forever()
-
-
-async def debug():
-    import gc
-
-    while True:
-        print(f"Free memory: {gc.mem_free()}")
-        await uasyncio.sleep(1)
 
 
 VM = Guesstimator()

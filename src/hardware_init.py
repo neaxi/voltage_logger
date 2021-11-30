@@ -1,10 +1,13 @@
 import os
 from time import sleep
+
 from machine import Pin, I2C, ADC, SPI
+from primitives.switch import Switch
 
 from circuitpython_i2c_lcd import I2cLcd
 from ads1x15 import ADS1115
 from sdcard import SDCard
+
 
 import config as CNFG
 from config import MESSAGES as MSG
@@ -31,7 +34,8 @@ def setup_pot():
 
 
 def setup_sw2():
-    return Pin(2, Pin.IN)
+    sw_pin = Pin(CNFG.PIN_SW2, Pin.IN, Pin.PULL_UP)
+    return Switch(sw_pin)
 
 
 def setup_sd():
