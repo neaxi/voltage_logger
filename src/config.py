@@ -1,10 +1,20 @@
 from array import array
 
+# amount of channels ... not really needed to be changed, but kept in CONST to have every magic number in one place
+CHNLS = 4
+
+# SPI pins - SD
+# bus 2 = SCK 18, CS 5, MISO 19, MOSI 23
+SD_SPI_BUS = 2
+SD_CS = 5
+
 CSV_SPLIT = "\t"  # used to split printed values
-T_ADS_MEAS = 0.2  # how often is the ADC sampled
-T_LCD_REFRESH_SETUP = 1  # fast for manual correction
-T_LCD_REFRESH_MEAS = 5  # slower for measuring
-T_SD_WRITE = 30  # how often to write to SD
+
+T_ADS_MEAS = 0.5  # how often is the ADC sampled
+T_LCD_REFRESH = 1  # updating LCD values
+T_CLI_PRINT_SETUP = 2  # used for setting up the correction
+T_CLI_PRINT_MEAS = 20  # slower, console log flood prevention
+T_SD_WRITE = 60  # how often perform SD write
 
 # potentiometer and SW2 pins
 PIN_SW2 = 4
@@ -48,12 +58,6 @@ ADS_CORRECTIONS = [
     + 1.8790 * (10 ** -1)
     + ADS_OFFSET,
 ]
-
-
-# SPI pins - SD
-# bus 2 = SCK 18, CS 5, MISO 19, MOSI 23
-SD_SPI_BUS = 2
-SD_CS = 5
 
 
 MESSAGES = {
