@@ -79,14 +79,28 @@ class Guesstimator:
             length = len(self.ads["avg_feed"][channel])
             return round(summary / length, 5)
 
+    """
+    CORO 2 - prepare data for SD queue
+    """
+
+    async def coro_data_prep(self):
+        """safely access avg data, create a copy and add it to SD queue"""
+        while True:
+            async with uasyncio.Lock():
+                tmp = list(self.volt_avg)  # instantiate a new object !!
+            self.sd_buffer.append(tmp)
+            await uasyncio.sleep(CNFG.T_CLI_PRINT_MEAS)
+
     def start(self):
         """
         corutines
         1 - measure ADC, parse values, write last 5
+        2 - prepare data in queue for LCD, CLI and SD
         """
         print("Starting parallel execution.")
         loop = uasyncio.get_event_loop(runq_len=40, waitq_len=40)
         loop.create_task(self.coro_ads_measure())
+        loop.create_task(self.coro_data_prep())
         loop.run_forever()
 
 
