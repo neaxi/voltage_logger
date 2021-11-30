@@ -91,16 +91,35 @@ class Guesstimator:
             self.sd_buffer.append(tmp)
             await uasyncio.sleep(CNFG.T_CLI_PRINT_MEAS)
 
+    """
+    CORO 3 - update LCD values
+    """
+
+    async def coro_update_lcd_voltages(self):
+        # self.hw["lcd"].show_cursor()
+        # self.hw["lcd"].clear()
+        while True:
+            async with uasyncio.Lock():
+                voltages = list(self.volt_avg)
+            for row in range(0, CNFG.CHNLS):
+                voltage = voltages[row]
+                msg = f"{row + 1}: {voltage:05.2f} V | "
+                self.hw["lcd"].move_to(0, row)
+                self.hw["lcd"].putstr(msg)
+            await uasyncio.sleep(CNFG.T_LCD_REFRESH)
+
     def start(self):
         """
         corutines
         1 - measure ADC, parse values, write last 5
         2 - prepare data in queue for LCD, CLI and SD
+        3 - update LCD values
         """
         print("Starting parallel execution.")
         loop = uasyncio.get_event_loop(runq_len=40, waitq_len=40)
         loop.create_task(self.coro_ads_measure())
         loop.create_task(self.coro_data_prep())
+        loop.create_task(self.coro_update_lcd_voltages())
         loop.run_forever()
 
 
