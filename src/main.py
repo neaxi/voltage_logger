@@ -1,6 +1,5 @@
 import sys
-
-# import _thread
+import os
 from time import sleep
 import uasyncio
 
@@ -22,13 +21,14 @@ class Guesstimator:
 
         # current state - meas vs setup
         self.meas = False
+        self.target_file = None
         # correction
         self.v_corr = 0
 
         # sd queue
         self.sd_buffer = []
 
-        #
+        # measurement variables
         self.meas_count = 0
         self.ads_buffer = CNFG.ADS_ARRAY
         self.ads = {
@@ -42,9 +42,9 @@ class Guesstimator:
         self.hw["sw2"].open_func(self.sw2_meas, (False,))
         self.hw["sw2"].close_func(self.sw2_meas, (True,))
 
-    """
-    CORO 1 - measure ADC values and parse them 
-    """
+    #
+    # CORO 1 - measure ADC values and parse them
+    #
 
     async def coro_ads_measure(self):
         """measure the channels, apply corrective math and store them"""
@@ -87,9 +87,9 @@ class Guesstimator:
             length = len(self.ads["avg_feed"][channel])
             return round(summary / length, 5)
 
-    """
-    CORO 2 - prepare data for SD queue
-    """
+    #
+    # CORO 2 - prepare data for SD queue
+    #
 
     async def coro_data_prep(self):
         """safely access avg data, create a copy and add it to SD queue"""
@@ -98,9 +98,9 @@ class Guesstimator:
                 self.sd_buffer.append(self.volt_avg)
             await uasyncio.sleep(CNFG.T_CLI_PRINT_MEAS)
 
-    """
-    CORO 3 - update LCD values
-    """
+    #
+    # CORO 3 - update LCD values
+    #
 
     async def coro_update_lcd_voltages(self):
         # self.hw["lcd"].show_cursor()
@@ -112,9 +112,9 @@ class Guesstimator:
                 self.hw["lcd"].putstr(msg)
             await uasyncio.sleep(CNFG.T_LCD_REFRESH)
 
-    """
-    CORO 4 - print CLI values
-    """
+    #
+    # CORO 4 - print CLI values
+    #
 
     async def coro_update_cli_values(self):
         while True:
@@ -136,19 +136,21 @@ class Guesstimator:
             else:
                 await uasyncio.sleep(CNFG.T_CLI_PRINT_SETUP)
 
-    """
-    CORO 5 - POT and SW2 
-    """
+    #
+    # CORO 5 - POT and SW2
+    #
 
     async def sw2_meas(self, state):
         if state:
             st = "closed"
             self.meas = True
+            self.sd_mount()
             print("MEASUREMENT: displaying AVG values")
         else:
             st = "opened"
             self.meas = False
             self.meas_count = 0
+            self.sd_umount()
             print("SETUP: displaying real time values")
         print(f"Switch SW2 is {st}; Meas state {self.meas}")
 
@@ -158,6 +160,53 @@ class Guesstimator:
             val = self.hw["pot"].read()
             self.v_corr = round(val / 4096 * CNFG.V_CORR - CNFG.V_CORR / 2, 2)
             await uasyncio.sleep(CNFG.T_ADS_MEAS)
+
+    #
+    # CORO 6 - SD card operations
+    #
+
+    def set_target_meas_file(self):
+        print(os.listdir(CNFG.SD_MNT))
+        files = os.listdir(CNFG.SD_MNT)
+        # filter measurement files only
+        filtered = list(filter(re.compile(CNFG.SD_FILE_PREFIX).match, files))
+        if not filtered:
+            self.target_file = f"{CNFG.SD_FILE_PREFIX}0000.txt"
+        else:
+            # find the highest number
+            maxint = max(map(int, [c.split("_")[1].split(".")[0] for c in filtered]))
+            self.target_file = f"{CNFG.SD_FILE_PREFIX}{maxint + 1:03d}.txt"
+
+    def sd_mount(self):
+        print(f"Mounting SD to {CNFG.SD_MNT}")
+        try:
+            vfs = os.VfsFat(self.hw["sd"])
+            os.mount(vfs, CNFG.SD_MNT)
+            set_target_meas_file()
+            print(f"Will be writting to {self.target_file}")
+        except BaseException as err:
+            print(f"!!! SD MOUNT FAILED:\n{err}")
+
+    def sd_umount(self):
+        print(f"Umounting SD from {CNFG.SD_MNT}")
+        try:
+            # os.path not available in micropython
+            os.umount(CNFG.SD_MNT)
+            self.target_file = None
+        except BaseException as err:
+            print(f"Umount failed:\n{err}")
+
+    async def sd_writer(self):
+        while True:
+            if self.meas and self.target_file:
+                with open(self.target_file, "a") as fp:
+                    for _ in range(len(self.sd_buffer)):
+                        # accessed via range instead of directly
+                        # a) to prevent access on object being changed
+                        # b) we're always poping index [0]
+                        out = self.sd_buffer.pop(0)
+                        fp.write(f"{out} + \n")
+            await uasyncio.sleep(T_SD_WRITE)
 
     def start(self):
         """
@@ -175,6 +224,7 @@ class Guesstimator:
         loop.create_task(self.coro_update_lcd_voltages())
         loop.create_task(self.coro_update_cli_values())
         loop.create_task(self.coro_measure_pot())
+        loop.create_task(self.sd_writer())
         loop.run_forever()
 
 

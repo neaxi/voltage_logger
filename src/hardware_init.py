@@ -1,4 +1,3 @@
-import os
 from time import sleep
 
 from machine import Pin, I2C, ADC, SPI
@@ -42,12 +41,7 @@ def setup_sd():
     # interface - , baudrate=80000000, miso=Pin(19), mosi=Pin(23), sck=Pin(18))
     spisd = SPI(CNFG.SD_SPI_BUS)
     spisd.init()
-    # storage
     sd = SDCard(spisd, Pin(CNFG.SD_CS))
-    vfs = os.VfsFat(sd)
-    # os.mount(vfs, "/sda")
-    # print(os.listdir("/sda"))
-    # os.umount("/sda")
 
     return sd
 
@@ -61,7 +55,12 @@ def print_status(lcd, msg):
 def hw_init():
     devices = {}
     fail_flag = False
-    i2c = setup_i2c()
+    try:
+        i2c = setup_i2c()
+        print(f"I2C OK - visible devices: {i2c.scan()}")
+    except BaseException as err:
+        print("I2C setup failed")
+        fail_flag = True
 
     peripheries = [
         ("lcd", setup_lcd, "LCD"),
@@ -74,9 +73,10 @@ def hw_init():
     for p in peripheries:
         try:
             if p[0] == "lcd" or p[0] == "ads":
+                # lcd and ads functions needs the I2C bus object
                 devices[p[0]] = p[1](i2c)
             else:
-                # SD, POT, SW2
+                # SD, POT, SW2 - func requires no arg
                 devices[p[0]] = p[1]()
             print_status(devices["lcd"], MSG["init"](p[2], "OK"))
         except BaseException as err:
@@ -88,8 +88,8 @@ def hw_init():
     sleep(2)
     if fail_flag:
         return None
-    else:
-        return devices
+
+    return devices
 
 
 if __name__ == "__main__":
