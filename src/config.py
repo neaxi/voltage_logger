@@ -7,13 +7,15 @@ CHNLS = 4
 # bus 2 = SCK 18, CS 5, MISO 19, MOSI 23
 SD_SPI_BUS = 2
 SD_CS = 5
+SD_MNT = "/sda"
+SD_FILE_PREFIX = r"measure_"
 
 CSV_SPLIT = "\t"  # used to split printed values
 
 T_ADS_MEAS = 0.5  # how often is the ADC sampled
 T_LCD_REFRESH = 1  # updating LCD values
-T_CLI_PRINT_SETUP = 2  # used for setting up the correction
-T_CLI_PRINT_MEAS = 20  # slower, console log flood prevention
+T_CLI_PRINT_SETUP = 0.6  # 2  # used for setting up the correction
+T_CLI_PRINT_MEAS = 1  # 20 # slower, console log flood prevention
 T_SD_WRITE = 60  # how often perform SD write
 
 # potentiometer and SW2 pins
@@ -21,6 +23,7 @@ PIN_SW2 = 4
 
 PIN_POT = 32
 V_CORR = 2  # voltage correction setting
+V_CORR_STEP = 0.05 * 100  # don't change the * 100, 2 digits float workaround
 
 # i2c bus pins - ADC, LCD
 I2C_SDA = 21
@@ -36,6 +39,7 @@ ADS_KEPT_VALUES = 5  # how many past measurements are we keeping
 
 ADS_ARRAY = array("h", (0 for _ in range(ADS_BUFFERSIZE)))
 ADS_OFFSET = -0.006  # balanced through calib spreadsheet
+ADS_MAGIC = 0  # if additional non deterministic magic is required
 ADS_CORRECTIONS = [
     lambda raw: (2.5270 * (10 ** -14) * raw ** 3)
     - (1.5459 * (10 ** -9) * raw ** 2)

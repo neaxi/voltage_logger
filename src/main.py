@@ -1,5 +1,7 @@
 import sys
 import os
+import math
+import re
 from time import sleep
 import uasyncio
 
@@ -62,8 +64,8 @@ class Guesstimator:
                 # apply third polynomial conversion and
                 voltage = CNFG.ADS_CORRECTIONS[channel](self.ads_buffer)
 
-                # add manual adjust
-                self.ads["volt_adj"][channel] = voltage + self.v_corr
+                # add manual adjust and possibly a magic number
+                self.ads["volt_adj"][channel] = voltage + self.v_corr + CNFG.ADS_MAGIC
 
                 # write into history buffer
                 self._adc_add_hist(channel, voltage)
@@ -121,13 +123,14 @@ class Guesstimator:
             if self.meas:
                 out = ["######"]
                 self.meas_count += 1
-                data = self.volt_avg
+                # workaround for power debugging ... return averages once done
+                data = self.ads["volt_adj"]  # self.volt_avg
             else:
                 out = []
                 # show real time values during setup
                 data = self.ads["volt_adj"]
             out += [f"{self.meas_count}"]
-            out += [f"{v:05.2f}" for v in self.ads["volt_adj"]]
+            out += [f"{v:05.2f}" for v in data]
             out += [str(self.v_corr)]
 
             print(CNFG.CSV_SPLIT.join(out))
@@ -155,10 +158,15 @@ class Guesstimator:
         print(f"Switch SW2 is {st}; Meas state {self.meas}")
 
     async def coro_measure_pot(self):
-        """read pot, map the 4096 values on range 0-V_CORR and substract half to have 0 in middle of the interval"""
+        """read pot, map the 4096 values on range 0-V_CORR, round to 2 places
+        substract half of V_CORR to have 0 in middle of the interval
+        adjust to the "step value" via ceiling
+        """
+        ceil = lambda x, y: math.ceil(x * (1.0 / y)) / (1.0 / y)
         while True:
             val = self.hw["pot"].read()
-            self.v_corr = round(val / 4096 * CNFG.V_CORR - CNFG.V_CORR / 2, 2)
+            v_mapped = (round(val / 4096 * CNFG.V_CORR, 2) - CNFG.V_CORR / 2) * 100
+            self.v_corr = ceil(v_mapped, CNFG.V_CORR_STEP) / 100
             await uasyncio.sleep(CNFG.T_ADS_MEAS)
 
     #
@@ -182,7 +190,7 @@ class Guesstimator:
         try:
             vfs = os.VfsFat(self.hw["sd"])
             os.mount(vfs, CNFG.SD_MNT)
-            set_target_meas_file()
+            self.set_target_meas_file()
             print(f"Will be writting to {self.target_file}")
         except BaseException as err:
             print(f"!!! SD MOUNT FAILED:\n{err}")
@@ -206,7 +214,7 @@ class Guesstimator:
                         # b) we're always poping index [0]
                         out = self.sd_buffer.pop(0)
                         fp.write(f"{out} + \n")
-            await uasyncio.sleep(T_SD_WRITE)
+            await uasyncio.sleep(CNFG.T_SD_WRITE)
 
     def start(self):
         """
