@@ -9,6 +9,7 @@ SD_SPI_BUS = 2
 SD_CS = 5
 SD_MNT = "/sda"
 SD_FILE_PREFIX = r"measure_"
+SD_FILE_HEADER = ["#", "CH 1", "CH 2", "CH 3", "CH 4"]
 
 CSV_SPLIT = "\t"  # used to split printed values
 
@@ -16,12 +17,13 @@ T_ADS_MEAS = 0.5  # how often is the ADC sampled
 T_LCD_REFRESH = 1  # updating LCD values
 T_CLI_PRINT_SETUP = 0.6  # 2  # used for setting up the correction
 T_CLI_PRINT_MEAS = 1  # 20 # slower, console log flood prevention
-T_SD_WRITE = 60  # how often perform SD write
+T_SD_WRITE = 120  # how often perform SD write
 
 # potentiometer and SW2 pins
-PIN_SW2 = 4
+PIN_SW2 = 34
+PIN_DEBUG = 35
 
-PIN_POT = 32
+PIN_POT = 33
 V_CORR = 2  # voltage correction setting
 V_CORR_STEP = 0.05 * 100  # don't change the * 100, 2 digits float workaround
 

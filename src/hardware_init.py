@@ -27,13 +27,18 @@ def setup_ads(i2c):
 
 
 def setup_pot():
-    pot = ADC(Pin(32))
+    pot = ADC(Pin(CNFG.PIN_POT))
     pot.atten(ADC.ATTN_11DB)
     return pot
 
 
 def setup_sw2():
-    sw_pin = Pin(CNFG.PIN_SW2, Pin.IN, Pin.PULL_UP)
+    sw_pin = Pin(CNFG.PIN_SW2, Pin.IN)
+    return Switch(sw_pin)
+
+
+def setup_sw_debug():
+    sw_pin = Pin(CNFG.PIN_DEBUG, Pin.IN)
     return Switch(sw_pin)
 
 
@@ -46,31 +51,36 @@ def setup_sd():
     return sd
 
 
-def print_status(lcd, msg):
+def print_status_on_lcd(lcd, msg):
     lcd.putstr(f"{msg}\n")
     msg = msg.replace(" ...", "\t...")
-    print(msg)
 
 
 def hw_init():
     devices = {}
-    fail_flag = False
+    master_fail_flag = False
     try:
         i2c = setup_i2c()
         print(f"I2C OK - visible devices: {i2c.scan()}")
     except BaseException as err:
         print("I2C setup failed")
-        fail_flag = True
+        master_fail_flag = True
 
     peripheries = [
         ("lcd", setup_lcd, "LCD"),
         ("ads", setup_ads, "ADS"),
-        ("sd", setup_sd, "SD"),
         ("pot", setup_pot, "POT"),
         ("sw2", setup_sw2, "SW2"),
+        ("sw_d", setup_sw_debug, "SW_D"),
+        ("sd", setup_sd, "SD"),
     ]
 
     for p in peripheries:
+        # p[0] = id
+        # p[1] = assoc setup function
+        # p[2] = user friendly name
+        fail = False
+        e_init = ""
         try:
             if p[0] == "lcd" or p[0] == "ads":
                 # lcd and ads functions needs the I2C bus object
@@ -78,15 +88,30 @@ def hw_init():
             else:
                 # SD, POT, SW2 - func requires no arg
                 devices[p[0]] = p[1]()
-            print_status(devices["lcd"], MSG["init"](p[2], "OK"))
         except BaseException as err:
-            print_status(devices["lcd"], MSG["init"](p[2], "FAIL"))
-            print(err)
-            fail_flag = True
+            e_init = err
+            fail = True
+            if p[0] != "sd":
+                master_fail_flag = True
+            else:
+                # if the SD is the only one which failed, continue
+                # we can boot up without SD
+                devices[p[0]] = None
+
+        if fail:
+            msg = MSG["init"](p[2], "FAIL")
+            print(f"{p[2]} failed on INIT. Exception details: {e_init}")
+        else:
+            msg = MSG["init"](p[2], "OK")
+            print(msg)
+        if "lcd" in devices:
+            print_status_on_lcd(devices["lcd"], f"{msg: <20s}")
+
         sleep(0.5)
 
     sleep(2)
-    if fail_flag:
+
+    if master_fail_flag:
         return None
 
     return devices

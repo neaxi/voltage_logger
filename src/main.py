@@ -2,11 +2,10 @@ import sys
 import os
 import math
 import re
-from time import sleep
 import uasyncio
 
 import config as CNFG
-from hardware_init import hw_init
+from hardware_init import hw_init, setup_sd
 
 print("\n" * 5)
 
@@ -30,6 +29,8 @@ class Guesstimator:
         # sd queue
         self.sd_buffer = []
 
+        self.lcd_messages = [""] * 4
+
         # measurement variables
         self.meas_count = 0
         self.ads_buffer = CNFG.ADS_ARRAY
@@ -51,7 +52,9 @@ class Guesstimator:
     async def coro_ads_measure(self):
         """measure the channels, apply corrective math and store them"""
         print("ADS_1115 measuring started")
-        print(f"AVG for {CNFG.ADS_KEPT_VALUES} values with {CNFG.T_ADS_MEAS} interval")
+        print(
+            f"Average for {CNFG.ADS_KEPT_VALUES} values with {CNFG.T_ADS_MEAS} interval"
+        )
         # continuous measuring loop feeding the data buffer with current voltage values
         while True:
             for channel in range(CNFG.CHNLS):
@@ -67,10 +70,10 @@ class Guesstimator:
                 # add manual adjust and possibly a magic number
                 self.ads["volt_adj"][channel] = voltage + self.v_corr + CNFG.ADS_MAGIC
 
-                # write into history buffer
-                self._adc_add_hist(channel, voltage)
+                # write processed (raw + corr + adj) values into history buffer
+                self._adc_add_hist(channel, self.ads["volt_adj"][channel])
 
-                # published averaged values
+                # publish averaged values
                 self.volt_avg[channel] = self.adc_avg_hist(channel)
             await uasyncio.sleep(CNFG.T_ADS_MEAS)
 
@@ -97,21 +100,32 @@ class Guesstimator:
         """safely access avg data, create a copy and add it to SD queue"""
         while True:
             if self.meas:
-                self.sd_buffer.append(self.volt_avg)
+                self.sd_buffer.append([self.meas_count] + self.volt_avg)
             await uasyncio.sleep(CNFG.T_CLI_PRINT_MEAS)
 
     #
-    # CORO 3 - update LCD values
+    # CORO 3 - LCD
     #
+    def lcd_message(self):
+        # ensure string is not longer than 8, if shorter pad to 8 places, align right
+        for line, msg in enumerate(self.lcd_messages):
+            fmt = lambda m: f"{m: >8.8s}"
+            self.hw["lcd"].move_to(12, line)
+            self.hw["lcd"].putstr(fmt(msg))
 
     async def coro_update_lcd_voltages(self):
         # self.hw["lcd"].show_cursor()
         while True:
             for row in range(0, CNFG.CHNLS):
                 voltage = self.ads["volt_adj"][row]
-                msg = f"{row + 1}: {voltage:05.2f} V | "
+                msg = f"{row + 1}: {voltage:05.2f} V |"
                 self.hw["lcd"].move_to(0, row)
                 self.hw["lcd"].putstr(msg)
+
+            # update LCD texts
+            if not self.hw["sd"] and not self.lcd_messages[2]:
+                self.lcd_messages[2] = "No SD"
+            self.lcd_message()
             await uasyncio.sleep(CNFG.T_LCD_REFRESH)
 
     #
@@ -149,24 +163,28 @@ class Guesstimator:
             self.meas = True
             self.sd_mount()
             print("MEASUREMENT: displaying AVG values")
+            self.lcd_messages[3] = "measure"
         else:
             st = "opened"
             self.meas = False
             self.meas_count = 0
             self.sd_umount()
             print("SETUP: displaying real time values")
+            self.lcd_messages[3] = "setup"
         print(f"Switch SW2 is {st}; Meas state {self.meas}")
 
     async def coro_measure_pot(self):
         """read pot, map the 4096 values on range 0-V_CORR, round to 2 places
         substract half of V_CORR to have 0 in middle of the interval
         adjust to the "step value" via ceiling
+        *100 and /100 operations added to avoid ceiling over float numbers
         """
         ceil = lambda x, y: math.ceil(x * (1.0 / y)) / (1.0 / y)
         while True:
             val = self.hw["pot"].read()
             v_mapped = (round(val / 4096 * CNFG.V_CORR, 2) - CNFG.V_CORR / 2) * 100
             self.v_corr = ceil(v_mapped, CNFG.V_CORR_STEP) / 100
+            self.lcd_messages[1] = f"C: {self.v_corr:5.2f}"
             await uasyncio.sleep(CNFG.T_ADS_MEAS)
 
     #
@@ -174,7 +192,7 @@ class Guesstimator:
     #
 
     def set_target_meas_file(self):
-        print(os.listdir(CNFG.SD_MNT))
+        print(f"Current SD Card files: {os.listdir(CNFG.SD_MNT)}")
         files = os.listdir(CNFG.SD_MNT)
         # filter measurement files only
         filtered = list(filter(re.compile(CNFG.SD_FILE_PREFIX).match, files))
@@ -183,17 +201,28 @@ class Guesstimator:
         else:
             # find the highest number
             maxint = max(map(int, [c.split("_")[1].split(".")[0] for c in filtered]))
-            self.target_file = f"{CNFG.SD_FILE_PREFIX}{maxint + 1:03d}.txt"
+            self.target_file = f"{CNFG.SD_FILE_PREFIX}{maxint + 1:04d}.txt"
 
     def sd_mount(self):
-        print(f"Mounting SD to {CNFG.SD_MNT}")
         try:
+            if not self.hw["sd"]:
+                print("Trying to init SD card again.")
+                self.hw["sd"] = setup_sd()
+
+            print(f"Mounting SD to {CNFG.SD_MNT}")
             vfs = os.VfsFat(self.hw["sd"])
             os.mount(vfs, CNFG.SD_MNT)
+
             self.set_target_meas_file()
             print(f"Will be writting to {self.target_file}")
+            # write header of the table into target
+            with open(f"{CNFG.SD_MNT}/{self.target_file}", "a") as fp:
+                fp.write(f"{CNFG.CSV_SPLIT.join(CNFG.SD_FILE_HEADER)}\n")
+            self.lcd_messages[2] = "SD READY"
+
         except BaseException as err:
             print(f"!!! SD MOUNT FAILED:\n{err}")
+            self.lcd_messages[2] = "SD ERROR"
 
     def sd_umount(self):
         print(f"Umounting SD from {CNFG.SD_MNT}")
@@ -202,18 +231,27 @@ class Guesstimator:
             os.umount(CNFG.SD_MNT)
             self.target_file = None
         except BaseException as err:
+            self.lcd_messages[2] = "SD ERROR"
             print(f"Umount failed:\n{err}")
 
     async def sd_writer(self):
         while True:
             if self.meas and self.target_file:
-                with open(self.target_file, "a") as fp:
-                    for _ in range(len(self.sd_buffer)):
-                        # accessed via range instead of directly
-                        # a) to prevent access on object being changed
-                        # b) we're always poping index [0]
-                        out = self.sd_buffer.pop(0)
-                        fp.write(f"{out} + \n")
+                print(f"Writing to SD. Total entries: {len(self.sd_buffer)}")
+                self.lcd_messages[2] = "SD WRITE"
+                try:
+                    with open(f"{CNFG.SD_MNT}/{self.target_file}", "a") as fp:
+                        for _ in range(len(self.sd_buffer)):
+                            # accessed via range instead of directly
+                            # a) to prevent access on object being changed
+                            # b) we're always poping index [0]
+                            out = map(str, self.sd_buffer.pop(0))
+                            fp.write(f"{CNFG.CSV_SPLIT.join(out)}\n")
+                    print("SD write complete.")
+                    self.lcd_messages[2] = "SD READY"
+                except BaseException as err:
+                    self.lcd_messages[2] = "SD ERROR"
+                    print(f"SD write failed:\n{err}")
             await uasyncio.sleep(CNFG.T_SD_WRITE)
 
     def start(self):
@@ -224,6 +262,7 @@ class Guesstimator:
         3 - update LCD values
         4 - CLI value printing
         5 - monitor POT and SW2
+        6 - SD writing coro
         """
         print("Starting parallel execution.")
         loop = uasyncio.get_event_loop(runq_len=40, waitq_len=40)
