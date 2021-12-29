@@ -9,14 +9,15 @@ SD_SPI_BUS = 2
 SD_CS = 5
 SD_MNT = "/sda"
 SD_FILE_PREFIX = r"measure_"
-SD_FILE_HEADER = ["#", "CH 1", "CH 2", "CH 3", "CH 4"]
+SD_FILE_HEADER = ["Time", "#", "CH 1", "CH 2", "CH 3", "CH 4"]
 
-CSV_SPLIT = "\t"  # used to split printed values
+CSV_SPLIT = ";"  # used to split SD saved values
+CLI_SPLIT = "\t"  # used to split values printed on the screen
 
 T_ADS_MEAS = 0.5  # how often is the ADC sampled
 T_LCD_REFRESH = 1  # updating LCD values
-T_CLI_PRINT_SETUP = 0.6  # 2  # used for setting up the correction
-T_CLI_PRINT_MEAS = 1  # 20 # slower, console log flood prevention
+T_CLI_PRINT_SETUP = 2  # used for setting up the correction
+T_CLI_PRINT_MEAS = 20  # slower, console log flood prevention
 T_SD_WRITE = 120  # how often perform SD write
 
 # potentiometer and SW2 pins
@@ -40,32 +41,32 @@ ADS_BUFFERSIZE = const(512)
 ADS_KEPT_VALUES = 5  # how many past measurements are we keeping
 
 ADS_ARRAY = array("h", (0 for _ in range(ADS_BUFFERSIZE)))
-ADS_OFFSET = -0.006  # balanced through calib spreadsheet
+ADS_OFFSET = 0.0018  # balanced through calib spreadsheet
 ADS_MAGIC = 0  # if additional non deterministic magic is required
 ADS_CORRECTIONS = [
-    lambda raw: (2.5270 * (10 ** -14) * raw ** 3)
-    - (1.5459 * (10 ** -9) * raw ** 2)
-    + (2.2487 * (10 ** -3) * raw)
-    + 1.9093 * (10 ** -1)
+    lambda raw: -(1.2028 * (10 ** -14) * raw ** 3)
+    + (6.6834 * (10 ** -10) * raw ** 2)
+    + (2.2315 * (10 ** -3) * raw)
+    + 1.4131 * (10 ** -1)
     + ADS_OFFSET,
-    lambda raw: (2.9633 * (10 ** -14) * raw ** 3)
-    - (1.7011 * (10 ** -9) * raw ** 2)
-    + (2.2531 * (10 ** -3) * raw)
-    + 2.0171 * (10 ** -1)
+    lambda raw: -(1.587 * (10 ** -14) * raw ** 3)
+    + (1.0182 * (10 ** -9) * raw ** 2)
+    + (2.2270 * (10 ** -3) * raw)
+    + 1.893 * (10 ** -1)
     + ADS_OFFSET,
-    lambda raw: (2.1699 * (10 ** -14) * raw ** 3)
-    - (1.5100 * (10 ** -9) * raw ** 2)
-    + (2.2491 * (10 ** -3) * raw)
-    + 1.8790 * (10 ** -1)
+    lambda raw: -(3.9360 * (10 ** -15) * raw ** 3)
+    + (3.0906 * (10 ** -10) * raw ** 2)
+    + (2.2384 * (10 ** -3) * raw)
+    + 1.2621 * (10 ** -1)
     + ADS_OFFSET,
-    lambda raw: (2.5082 * (10 ** -14) * raw ** 3)
-    - (1.5100 * (10 ** -9) * raw ** 2)
-    + (2.2491 * (10 ** -3) * raw)
-    + 1.8790 * (10 ** -1)
+    lambda raw: -(5.5219 * (10 ** -15) * raw ** 3)
+    + (4.1715 * (10 ** -10) * raw ** 2)
+    + (2.2351 * (10 ** -3) * raw)
+    + 1.3192 * (10 ** -1)
     + ADS_OFFSET,
 ]
 
 
 MESSAGES = {
-    "init": (lambda msg, status: f"init {msg} ... {status}"),
+    "init": (lambda dev, status: f"init {dev} ... {status}"),
 }

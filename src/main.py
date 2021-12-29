@@ -2,6 +2,7 @@ import sys
 import os
 import math
 import re
+import time
 import uasyncio
 
 import config as CNFG
@@ -10,12 +11,18 @@ from hardware_init import hw_init, setup_sd
 print("\n" * 5)
 
 
+def timestr():
+    t = time.localtime()
+    return f"{t[3]:02}:{t[4]:02}:{t[5]:02}"
+
+
 class Guesstimator:
     def __init__(self):
         self.hw = hw_init()
         if self.hw:
             self.hw["lcd"].clear()
             self._add_sw2_handlers()
+
         else:
             print("Hardware setup error. Exiting\n\n\n")
             sys.exit()
@@ -30,20 +37,36 @@ class Guesstimator:
         self.sd_buffer = []
 
         self.lcd_messages = [""] * 4
+        # default LCD values after boot
+        self.lcd_messages[2] = "SD: ???"
+        self.lcd_messages[3] = "setup"
 
         # measurement variables
         self.meas_count = 0
         self.ads_buffer = CNFG.ADS_ARRAY
         self.ads = {
+            # voltages converted from raw after corrections/adjustment
             "volt_adj": [0] * CNFG.CHNLS,  # empty list, 4 elements
+            # raw valueas as measured by the ADC
             "raw": [0] * CNFG.CHNLS,  # empty list, 4 elements
+            # holds historical data from which averages are computed
             "avg_feed": [[] for _ in range(CNFG.CHNLS)],  # list of lists
+            # average values computed from the feed, ready to be printed out
+            "avg_print": [0] * CNFG.CHNLS,
         }
-        self.volt_avg = [0] * CNFG.CHNLS
 
     def _add_sw2_handlers(self):
         self.hw["sw2"].open_func(self.sw2_meas, (False,))
         self.hw["sw2"].close_func(self.sw2_meas, (True,))
+
+    def sd_fail(self, msg):
+        print(msg)
+        self.lcd_messages[2] = "SD ERROR"
+        print("Attempting to remount SD card")
+        try:
+            self.hw["sd"] = setup_sd()
+        except OSError:
+            print("Remount failed.")
 
     #
     # CORO 1 - measure ADC values and parse them
@@ -66,7 +89,6 @@ class Guesstimator:
 
                 # apply third polynomial conversion and
                 voltage = CNFG.ADS_CORRECTIONS[channel](self.ads_buffer)
-
                 # add manual adjust and possibly a magic number
                 self.ads["volt_adj"][channel] = voltage + self.v_corr + CNFG.ADS_MAGIC
 
@@ -74,7 +96,7 @@ class Guesstimator:
                 self._adc_add_hist(channel, self.ads["volt_adj"][channel])
 
                 # publish averaged values
-                self.volt_avg[channel] = self.adc_avg_hist(channel)
+                self.ads["avg_print"][channel] = self.adc_avg_hist(channel)
             await uasyncio.sleep(CNFG.T_ADS_MEAS)
 
     def _adc_add_hist(self, channel, voltage):
@@ -100,7 +122,9 @@ class Guesstimator:
         """safely access avg data, create a copy and add it to SD queue"""
         while True:
             if self.meas:
-                self.sd_buffer.append([self.meas_count] + self.volt_avg)
+                self.sd_buffer.append(
+                    [timestr(), self.meas_count] + self.ads["avg_print"]
+                )
             await uasyncio.sleep(CNFG.T_CLI_PRINT_MEAS)
 
     #
@@ -123,6 +147,7 @@ class Guesstimator:
                 self.hw["lcd"].putstr(msg)
 
             # update LCD texts
+            self.lcd_messages[0] = timestr()
             if not self.hw["sd"] and not self.lcd_messages[2]:
                 self.lcd_messages[2] = "No SD"
             self.lcd_message()
@@ -131,14 +156,18 @@ class Guesstimator:
     #
     # CORO 4 - print CLI values
     #
+    def debug(self):
+        # print(self.ads)
+        # print(self.lcd_messages)
+        pass
 
     async def coro_update_cli_values(self):
         while True:
             if self.meas:
-                out = ["######"]
+                out = ["######", timestr()]
                 self.meas_count += 1
                 # workaround for power debugging ... return averages once done
-                data = self.ads["volt_adj"]  # self.volt_avg
+                data = self.ads["avg_print"]
             else:
                 out = []
                 # show real time values during setup
@@ -147,7 +176,10 @@ class Guesstimator:
             out += [f"{v:05.2f}" for v in data]
             out += [str(self.v_corr)]
 
-            print(CNFG.CSV_SPLIT.join(out))
+            # print debug data
+            self.debug()
+
+            print(CNFG.CLI_SPLIT.join(out))
             if self.meas:
                 await uasyncio.sleep(CNFG.T_CLI_PRINT_MEAS)
             else:
@@ -183,7 +215,8 @@ class Guesstimator:
         while True:
             val = self.hw["pot"].read()
             v_mapped = (round(val / 4096 * CNFG.V_CORR, 2) - CNFG.V_CORR / 2) * 100
-            self.v_corr = ceil(v_mapped, CNFG.V_CORR_STEP) / 100
+            # -1 * introduced to have positive values on the right side of the pot
+            self.v_corr = -1 * ceil(v_mapped, CNFG.V_CORR_STEP) / 100
             self.lcd_messages[1] = f"C: {self.v_corr:5.2f}"
             await uasyncio.sleep(CNFG.T_ADS_MEAS)
 
@@ -197,17 +230,16 @@ class Guesstimator:
         # filter measurement files only
         filtered = list(filter(re.compile(CNFG.SD_FILE_PREFIX).match, files))
         if not filtered:
-            self.target_file = f"{CNFG.SD_FILE_PREFIX}0000.txt"
+            self.target_file = f"{CNFG.SD_FILE_PREFIX}0000.csv"
         else:
             # find the highest number
             maxint = max(map(int, [c.split("_")[1].split(".")[0] for c in filtered]))
-            self.target_file = f"{CNFG.SD_FILE_PREFIX}{maxint + 1:04d}.txt"
+            self.target_file = f"{CNFG.SD_FILE_PREFIX}{maxint + 1:04d}.csv"
 
     def sd_mount(self):
         try:
             if not self.hw["sd"]:
-                print("Trying to init SD card again.")
-                self.hw["sd"] = setup_sd()
+                self.sd_fail("Trying to init SD card again.")
 
             print(f"Mounting SD to {CNFG.SD_MNT}")
             vfs = os.VfsFat(self.hw["sd"])
@@ -221,8 +253,7 @@ class Guesstimator:
             self.lcd_messages[2] = "SD READY"
 
         except BaseException as err:
-            print(f"!!! SD MOUNT FAILED:\n{err}")
-            self.lcd_messages[2] = "SD ERROR"
+            self.sd_fail(f"!!! SD MOUNT FAILED:\n{err}")
 
     def sd_umount(self):
         print(f"Umounting SD from {CNFG.SD_MNT}")
@@ -231,8 +262,7 @@ class Guesstimator:
             os.umount(CNFG.SD_MNT)
             self.target_file = None
         except BaseException as err:
-            self.lcd_messages[2] = "SD ERROR"
-            print(f"Umount failed:\n{err}")
+            self.sd_fail(f"Umount failed:\n{err}")
 
     async def sd_writer(self):
         while True:
@@ -250,8 +280,7 @@ class Guesstimator:
                     print("SD write complete.")
                     self.lcd_messages[2] = "SD READY"
                 except BaseException as err:
-                    self.lcd_messages[2] = "SD ERROR"
-                    print(f"SD write failed:\n{err}")
+                    self.sd_fail(f"SD write failed:\n{err}")
             await uasyncio.sleep(CNFG.T_SD_WRITE)
 
     def start(self):
@@ -275,10 +304,6 @@ class Guesstimator:
         loop.run_forever()
 
 
-VM = Guesstimator()
-
-# VM.measure()
-VM.start()
-
-# VM.debug()
-# VM.voltage_demo()
+if __name__ == "__main__":
+    VM = Guesstimator()
+    VM.start()
