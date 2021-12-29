@@ -19,7 +19,12 @@ spisd = SPI(2)  # , baudrate=80000000, miso=Pin(19), mosi=Pin(23), sck=Pin(18))
 spisd.init()
 sd = SDCard(spisd, Pin(5))
 # os.VfsFat.mkfs(sd)
-vfs = os.VfsFat(sd)
-os.mount(vfs, "/sda")
+# vfs = os.VfsFat(sd)
+os.mount(sd, "/sda")
 print(os.listdir("/sda"))
+with open("/sda/test.txt", "a") as fp:
+    for idx in range(0, 1000):
+        print(f"writing {idx}")
+        fp.write(f"{idx}\n")
+
 os.umount("/sda")
