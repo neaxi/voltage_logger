@@ -21,7 +21,7 @@ class Guesstimator:
         self.hw = hw_init()
         if self.hw:
             self.hw["lcd"].clear()
-            self._add_sw2_handlers()
+            self._add_switch_handlers()
 
         else:
             print("Hardware setup error. Exiting\n\n\n")
@@ -29,6 +29,7 @@ class Guesstimator:
 
         # current state - meas vs setup
         self.meas = False
+        self.debug = False
         self.target_file = None
         # correction
         self.v_corr = 0
@@ -55,9 +56,11 @@ class Guesstimator:
             "avg_print": [0] * CNFG.CHNLS,
         }
 
-    def _add_sw2_handlers(self):
+    def _add_switch_handlers(self):
         self.hw["sw2"].open_func(self.sw2_meas, (False,))
         self.hw["sw2"].close_func(self.sw2_meas, (True,))
+        self.hw["sw_d"].open_func(self.sw_debug, (False,))
+        self.hw["sw_d"].close_func(self.sw_debug, (True,))
 
     def sd_fail(self, msg):
         print(msg)
@@ -92,12 +95,51 @@ class Guesstimator:
                 # add manual adjust and possibly a magic number
                 self.ads["volt_adj"][channel] = voltage + self.v_corr + CNFG.ADS_MAGIC
 
-                # write processed (raw + corr + adj) values into history buffer
-                self._adc_add_hist(channel, self.ads["volt_adj"][channel])
+            # perform subtractions - must be performed after all the channels are known
+            self.ads["sub"] = self.ads_subtract(self.ads["volt_adj"])
+
+            for channel in range(CNFG.CHNLS):
+                # write processed sub(raw + corr + adj) values into history buffer
+                self._adc_add_hist(channel, self.ads["sub"][channel])
 
                 # publish averaged values
                 self.ads["avg_print"][channel] = self.adc_avg_hist(channel)
             await uasyncio.sleep(CNFG.T_ADS_MEAS)
+
+    def ads_subtract(self, v):
+        meas = list(v)  # temporary list for processing
+        final = [0] * CNFG.CHNLS
+        buffer = []
+        # figure out the channel order
+        # processed items are max'd by CNFG.TMAX CONST
+        while sum(meas) != CNFG.CHNLS * CNFG.TMAX:
+            # find minimum value + its position and store them
+            idx = meas.index(min(meas))
+            volts = meas[idx] if meas[idx] > 1 else 0
+            buffer.append((idx, volts))
+            # max the item we've already processed so it won't get picked by min()
+            # can't use del() or pop() as it would shift the indexes
+            meas[idx] = CNFG.TMAX
+
+        # go through values and subtract sum of the previous/smaller measurements
+        for idx, m in enumerate(buffer):
+            if idx == 0:
+                # first one is the smallest = no subtraction
+                final[m[0]] = m[1]
+            elif (
+                buffer[idx - 1][1] >= m[1] - CNFG.TOLER
+                and buffer[idx - 1][1] <= m[1] + CNFG.TOLER
+            ):
+                # probes most likely on the same wire or the battery died
+                # ie +- the same voltage as previous
+                # zero out the previous value to have the common on the highest channel number
+                final[m[0] - 1] = 0
+                final[m[0]] = m[1] - sum(final)
+            else:
+                # with each higher number we subtract sum of all the previous
+                final[m[0]] = m[1] - sum(final)
+        del v, buffer  # cleanup
+        return final
 
     def _adc_add_hist(self, channel, voltage):
         """writes the value into historical voltage buffer while maintaining the boundaries"""
@@ -138,10 +180,17 @@ class Guesstimator:
             self.hw["lcd"].putstr(fmt(msg))
 
     async def coro_update_lcd_voltages(self):
-        # self.hw["lcd"].show_cursor()
+        if self.debug:
+            self.hw["lcd"].show_cursor()
         while True:
             for row in range(0, CNFG.CHNLS):
-                voltage = self.ads["volt_adj"][row]
+                if self.debug:
+                    # show me the raw voltages for debugging
+                    voltage = self.ads["volt_adj"][row]
+                else:
+                    # otherwise subtracted only
+                    voltage = self.ads["sub"][row]
+
                 msg = f"{row + 1}: {voltage:05.2f} V |"
                 self.hw["lcd"].move_to(0, row)
                 self.hw["lcd"].putstr(msg)
@@ -156,7 +205,7 @@ class Guesstimator:
     #
     # CORO 4 - print CLI values
     #
-    def debug(self):
+    def debug_print(self):
         # print(self.ads)
         # print(self.lcd_messages)
         pass
@@ -171,23 +220,44 @@ class Guesstimator:
             else:
                 out = []
                 # show real time values during setup
-                data = self.ads["volt_adj"]
+                data = self.ads["sub"]
+                if self.debug:
+                    data += self.ads["volt_adj"]
             out += [f"{self.meas_count}"]
             out += [f"{v:05.2f}" for v in data]
             out += [str(self.v_corr)]
 
             # print debug data
-            self.debug()
+            if self.debug:
+                self.debug_print()
 
             print(CNFG.CLI_SPLIT.join(out))
+            # throw away the list after printing it
+            del data, out
+
             if self.meas:
                 await uasyncio.sleep(CNFG.T_CLI_PRINT_MEAS)
             else:
                 await uasyncio.sleep(CNFG.T_CLI_PRINT_SETUP)
 
     #
-    # CORO 5 - POT and SW2
+    # CORO 5 - POT and Switches
+    # switches are called from their respectiva handlers
     #
+    async def sw_debug(self, state):
+        if state and self.meas:
+            print("Debug not allowed in Measurement mode")
+        elif state:
+            print("Debug mode turned on")
+            self.debug = True
+            self.lcd_messages[3] = "DEBUG!!"
+        elif not state and not self.debug:
+            # switched got opened, but we were not in debug anyway
+            pass
+        else:
+            self.debug = False
+            print("Debug mode turned off")
+            self.lcd_messages[3] = "setup"
 
     async def sw2_meas(self, state):
         if state:

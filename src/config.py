@@ -66,6 +66,9 @@ ADS_CORRECTIONS = [
     + ADS_OFFSET,
 ]
 
+TMAX = 99  # max value used to filter values during subtraction
+TOLER = 1  # offset which says which voltages are still the same
+
 
 MESSAGES = {
     "init": (lambda dev, status: f"init {dev} ... {status}"),
