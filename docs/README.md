@@ -65,6 +65,7 @@ Permanent log (.csv) is stored on the SD card and currently measurred values are
     - I2C, 2x16 (or 20x4) chars, provides current values and instructions
     - 20x4:
         - default I2C address = 39 (0x27)
+    - custom LCD char guide https://clach04.github.io/lcdchargen/
         
 - UART/Serial data line
     - to allow terminal output and logging (PuTTY). Speed: 115200
@@ -90,8 +91,8 @@ Permanent log (.csv) is stored on the SD card and currently measurred values are
 
 # Future 
 **TBD / not finished**
-- [ ] - subtract voltages from each other to get net voltages staright from the logger
-- [ ] - debug switch to change behavior for development/troubleshooting  
+- [x] - subtract voltages from each other to get net voltages staright from the logger
+- [x] - debug switch to change behavior for development/troubleshooting  
   - different LCD and CLI printout
 
 **Possible future features**

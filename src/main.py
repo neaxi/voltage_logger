@@ -264,12 +264,16 @@ class Guesstimator:
             st = "closed"
             self.meas = True
             self.sd_mount()
-            print("MEASUREMENT: displaying AVG values")
+            print("MEASUREMENT: displaying average (AVG) values")
+            print(f"MEASUREMENT: interval {CNFG.T_CLI_PRINT_MEAS} sec")
+            print(f"MEASUREMENT: saving data to SD every {CNFG.T_SD_WRITE} sec")
             self.lcd_messages[3] = "measure"
         else:
             st = "opened"
             self.meas = False
             self.meas_count = 0
+            # dump any measurement left in a buffer prior umount
+            self.dump_buffer_to_sd()
             self.sd_umount()
             print("SETUP: displaying real time values")
             self.lcd_messages[3] = "setup"
@@ -334,23 +338,27 @@ class Guesstimator:
         except BaseException as err:
             self.sd_fail(f"Umount failed:\n{err}")
 
+    def dump_buffer_to_sd(self):
+        if self.target_file:
+            print(f"Writing to SD. Total entries: {len(self.sd_buffer)}")
+            self.lcd_messages[2] = "SD WRITE"
+            try:
+                with open(f"{CNFG.SD_MNT}/{self.target_file}", "a") as fp:
+                    for _ in range(len(self.sd_buffer)):
+                        # accessed via range instead of directly
+                        # a) to prevent access on object being changed
+                        # b) we're always poping index [0]
+                        out = map(str, self.sd_buffer.pop(0))
+                        fp.write(f"{CNFG.CSV_SPLIT.join(out)}\n")
+                print("SD write complete.")
+                self.lcd_messages[2] = "SD READY"
+            except BaseException as err:
+                self.sd_fail(f"SD write failed:\n{err}")
+
     async def sd_writer(self):
         while True:
-            if self.meas and self.target_file:
-                print(f"Writing to SD. Total entries: {len(self.sd_buffer)}")
-                self.lcd_messages[2] = "SD WRITE"
-                try:
-                    with open(f"{CNFG.SD_MNT}/{self.target_file}", "a") as fp:
-                        for _ in range(len(self.sd_buffer)):
-                            # accessed via range instead of directly
-                            # a) to prevent access on object being changed
-                            # b) we're always poping index [0]
-                            out = map(str, self.sd_buffer.pop(0))
-                            fp.write(f"{CNFG.CSV_SPLIT.join(out)}\n")
-                    print("SD write complete.")
-                    self.lcd_messages[2] = "SD READY"
-                except BaseException as err:
-                    self.sd_fail(f"SD write failed:\n{err}")
+            if self.meas:
+                self.dump_buffer_to_sd()
             await uasyncio.sleep(CNFG.T_SD_WRITE)
 
     def start(self):
